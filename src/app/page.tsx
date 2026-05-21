@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Sparkles, Cctv } from "lucide-react";
+import { Sparkles, Cctv, HelpCircle } from "lucide-react";
 import { RecordButton, RecordingTimer } from "@/components/VoiceRecorder";
 import { TranscriptDisplay } from "@/components/TranscriptDisplay";
 import { FocusToggle, FocusOverlay } from "@/components/FocusMode";
@@ -14,12 +15,17 @@ import { useStructuring, useStructuringStore } from "@/features/ai/useStructurin
 import { DEFAULT_AI_CONFIG } from "@/types/ai";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { HelpDialog } from "@/components/HelpDialog";
 import { PetMonitor } from "@/features/attention-monitor";
 import { useAttentionMonitor } from "@/features/attention-monitor";
 import { useAttentionStore } from "@/features/attention-monitor";
+import { useRecorder } from "@/features/audio/useRecorder";
+import { exportNote } from "@/features/notes/export";
 
 export default function HomePage() {
   const [showStructured, setShowStructured] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+  const router = useRouter();
   const audioUrl = useRecorderStore((s) => s.audioUrl);
   const status = useRecorderStore((s) => s.status);
   const text = useTranscriptionStore((s) => s.text);
@@ -28,9 +34,12 @@ export default function HomePage() {
   const { isStructuring, result } = useStructuringStore();
   const createNote = useNotesStore((s) => s.createNote);
   const setStructuredContent = useNotesStore((s) => s.setStructuredContent);
+  const notes = useNotesStore((s) => s.notes);
+  const selectedNote = useNotesStore((s) => s.selectedNote);
   const attentionEnabled = useAttentionStore((s) => s.enabled);
   const setAttentionEnabled = useAttentionStore((s) => s.setEnabled);
   const { videoRef, canvasRef } = useAttentionMonitor();
+  const { start, stop } = useRecorder();
 
   const handleTranscribe = useCallback(async () => {
     const blob = useRecorderStore.getState().audioBlob;
@@ -69,6 +78,36 @@ export default function HomePage() {
     setShowStructured(false);
   }, []);
 
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      if (showHelp) return;
+
+      if (e.code === "Space") {
+        e.preventDefault();
+        const s = useRecorderStore.getState().status;
+        if (s === "idle" || s === "error") start();
+        else if (s === "recording") useRecorderStore.getState().setStatus("paused");
+        else if (s === "paused") useRecorderStore.getState().setStatus("recording");
+      }
+      if (e.ctrlKey && e.key === "n") {
+        e.preventDefault();
+        router.push("/notes");
+      }
+      if (e.ctrlKey && e.key === "e") {
+        e.preventDefault();
+        const note = useNotesStore.getState().selectedNote;
+        if (note) exportNote(note, "markdown");
+      }
+      if (e.key === "Escape") {
+        setShowHelp(false);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [showHelp, start, router]);
+
   const hasTranscript = text.length > 0;
 
   return (
@@ -81,6 +120,15 @@ export default function HomePage() {
             <span className="font-semibold text-lg">MindNote</span>
           </div>
           <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowHelp(true)}
+              title="使用帮助"
+              className="text-amber-400 hover:text-amber-300"
+            >
+              <HelpCircle className="size-4 mr-1" /> 帮助
+            </Button>
             <Button
               variant={attentionEnabled ? "secondary" : "ghost"}
               size="sm"
@@ -193,6 +241,9 @@ export default function HomePage() {
 
         {/* Pet monitor overlay */}
         <PetMonitor />
+
+        {/* Help dialog */}
+        <HelpDialog open={showHelp} onOpenChange={setShowHelp} />
       </div>
     </FocusOverlay>
   );
