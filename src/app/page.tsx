@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { motion } from "framer-motion";
-import { Sparkles } from "lucide-react";
+import { Sparkles, Cctv } from "lucide-react";
 import { RecordButton, RecordingTimer } from "@/components/VoiceRecorder";
 import { TranscriptDisplay } from "@/components/TranscriptDisplay";
 import { FocusToggle, FocusOverlay } from "@/components/FocusMode";
@@ -14,6 +14,9 @@ import { useStructuring, useStructuringStore } from "@/features/ai/useStructurin
 import { DEFAULT_AI_CONFIG } from "@/types/ai";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { PetMonitor } from "@/features/attention-monitor";
+import { useAttentionMonitor } from "@/features/attention-monitor";
+import { useAttentionStore } from "@/features/attention-monitor";
 
 export default function HomePage() {
   const [showStructured, setShowStructured] = useState(false);
@@ -25,6 +28,9 @@ export default function HomePage() {
   const { isStructuring, result } = useStructuringStore();
   const createNote = useNotesStore((s) => s.createNote);
   const setStructuredContent = useNotesStore((s) => s.setStructuredContent);
+  const attentionEnabled = useAttentionStore((s) => s.enabled);
+  const setAttentionEnabled = useAttentionStore((s) => s.setEnabled);
+  const { videoRef, canvasRef } = useAttentionMonitor();
 
   const handleTranscribe = useCallback(async () => {
     const blob = useRecorderStore.getState().audioBlob;
@@ -74,7 +80,17 @@ export default function HomePage() {
             <Sparkles className="size-5 text-primary" />
             <span className="font-semibold text-lg">MindNote</span>
           </div>
-          <FocusToggle />
+          <div className="flex items-center gap-1">
+            <Button
+              variant={attentionEnabled ? "secondary" : "ghost"}
+              size="sm"
+              onClick={() => setAttentionEnabled(!attentionEnabled)}
+              title="Toggle attention pet"
+            >
+              <Cctv className="size-4" />
+            </Button>
+            <FocusToggle />
+          </div>
         </div>
 
         {/* Main */}
@@ -165,6 +181,18 @@ export default function HomePage() {
             </div>
           )}
         </div>
+
+        {/* Hidden camera feed for attention monitor */}
+        <video
+          ref={videoRef}
+          className="hidden"
+          playsInline
+          muted
+        />
+        <canvas ref={canvasRef} className="hidden" />
+
+        {/* Pet monitor overlay */}
+        <PetMonitor />
       </div>
     </FocusOverlay>
   );

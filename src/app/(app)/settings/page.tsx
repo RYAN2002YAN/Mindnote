@@ -1,18 +1,26 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { LogIn, LogOut, Key, Eye, Zap } from "lucide-react";
+import { LogIn, LogOut, Key, Eye, Zap, Cctv, Volume2, Mic } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuthStore } from "@/features/auth/useAuth";
 import { createClient } from "@/features/auth/supabase-client";
 import { useRouter } from "next/navigation";
+import { useAttentionStore } from "@/features/attention-monitor";
+import type { PetType, FilterAlgorithm } from "@/features/attention-monitor";
 
 export default function SettingsPage() {
   const { user, signOut } = useAuthStore();
   const router = useRouter();
+  const attentionSettings = useAttentionStore((s) => s.settings);
+  const attentionEnabled = useAttentionStore((s) => s.enabled);
+  const updateAttentionSettings = useAttentionStore((s) => s.updateSettings);
+  const setAttentionEnabled = useAttentionStore((s) => s.setEnabled);
 
   const [openaiKey, setOpenaiKey] = useState("");
   const [aiKey, setAiKey] = useState("");
@@ -122,6 +130,124 @@ export default function SettingsPage() {
             </Button>
           </div>
         )}
+      </div>
+
+      <Separator />
+
+      {/* Attention Monitor */}
+      <div className="space-y-4">
+        <h2 className="text-lg font-semibold flex items-center gap-2">
+          <Cctv className="size-5" /> Attention Pet Monitor
+        </h2>
+        <p className="text-sm text-muted-foreground">
+          A cute companion that gently keeps you focused. Uses your camera locally — no data is ever sent anywhere.
+        </p>
+
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <Label>Enable Pet Monitor</Label>
+              <p className="text-xs text-muted-foreground">Camera access required</p>
+            </div>
+            <Switch
+              checked={attentionEnabled}
+              onCheckedChange={setAttentionEnabled}
+            />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <Label>Reminder Sensitivity</Label>
+            <Select
+              value={attentionSettings.sensitivity}
+              onValueChange={(v) => updateAttentionSettings({ sensitivity: v as "relaxed" | "moderate" | "strict" })}
+            >
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="relaxed">Relaxed</SelectItem>
+                <SelectItem value="moderate">Moderate</SelectItem>
+                <SelectItem value="strict">Strict</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <Label>Pet Character</Label>
+            <Select
+              value={attentionSettings.petType}
+              onValueChange={(v) => updateAttentionSettings({ petType: v as PetType })}
+            >
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="penguin">🐧 Penguin</SelectItem>
+                <SelectItem value="shiba">🐶 Shiba</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <Label>Pet Size</Label>
+            <Select
+              value={attentionSettings.petSize}
+              onValueChange={(v) => updateAttentionSettings({ petSize: v as "small" | "medium" | "large" })}
+            >
+              <SelectTrigger className="w-32">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="small">Small</SelectItem>
+                <SelectItem value="medium">Medium</SelectItem>
+                <SelectItem value="large">Large</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <Label>DSP Filter Algorithm</Label>
+            <Select
+              value={attentionSettings.filterAlgorithm}
+              onValueChange={(v) => updateAttentionSettings({ filterAlgorithm: v as FilterAlgorithm })}
+            >
+              <SelectTrigger className="w-36">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="moving-average">Moving Average</SelectItem>
+                <SelectItem value="kalman">Kalman (DSP)</SelectItem>
+                <SelectItem value="fir">FIR Lowpass</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div>
+              <Label className="flex items-center gap-1">
+                <Volume2 className="size-3" /> Voice Reminders
+              </Label>
+              <p className="text-xs text-muted-foreground">Gentle voice prompts when distracted</p>
+            </div>
+            <Switch
+              checked={attentionSettings.voiceReminders}
+              onCheckedChange={(v: boolean) => updateAttentionSettings({ voiceReminders: v })}
+            />
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div>
+              <Label className="flex items-center gap-1">
+                <Mic className="size-3" /> Smart Auto-Record
+              </Label>
+              <p className="text-xs text-muted-foreground">Auto start/pause recording based on focus level</p>
+            </div>
+            <Switch
+              checked={attentionSettings.autoRecord}
+              onCheckedChange={(v: boolean) => updateAttentionSettings({ autoRecord: v })}
+            />
+          </div>
+        </div>
       </div>
 
       <Separator />
