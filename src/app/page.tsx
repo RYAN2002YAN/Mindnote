@@ -1,250 +1,337 @@
 "use client";
 
-import { useCallback, useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
-import { Sparkles, Cctv, HelpCircle } from "lucide-react";
-import { RecordButton, RecordingTimer } from "@/components/VoiceRecorder";
-import { TranscriptDisplay } from "@/components/TranscriptDisplay";
-import { FocusToggle, FocusOverlay } from "@/components/FocusMode";
-import { AudioPlayer } from "@/features/audio/AudioPlayer";
-import { useRecorderStore } from "@/features/audio/useRecorder";
-import { useTranscription, useTranscriptionStore } from "@/features/audio/useTranscription";
-import { useNotesStore } from "@/features/notes/useNotes";
-import { useStructuring, useStructuringStore } from "@/features/ai/useStructuring";
-import { DEFAULT_AI_CONFIG } from "@/types/ai";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { useState, useCallback, useEffect } from "react";
+import { Mic, MicOff, Square, HelpCircle } from "lucide-react";
 import { HelpDialog } from "@/components/HelpDialog";
-import { PetMonitor } from "@/features/attention-monitor";
-import { useAttentionMonitor } from "@/features/attention-monitor";
-import { useAttentionStore } from "@/features/attention-monitor";
-import { useRecorder } from "@/features/audio/useRecorder";
-import { exportNote } from "@/features/notes/export";
+import { useRecorder, useRecorderStore } from "@/features/audio/useRecorder";
+import { useTranscriptionStore } from "@/features/audio/useTranscription";
 
 export default function HomePage() {
-  const [showStructured, setShowStructured] = useState(false);
   const [showHelp, setShowHelp] = useState(false);
-  const router = useRouter();
-  const audioUrl = useRecorderStore((s) => s.audioUrl);
+  const [recordingText, setRecordingText] = useState("");
+  const { start, pause, resume, stop } = useRecorder();
   const status = useRecorderStore((s) => s.status);
-  const text = useTranscriptionStore((s) => s.text);
-  const { transcribeWithWhisper } = useTranscription();
-  const { runStructuring } = useStructuring();
-  const { isStructuring, result } = useStructuringStore();
-  const createNote = useNotesStore((s) => s.createNote);
-  const setStructuredContent = useNotesStore((s) => s.setStructuredContent);
-  const notes = useNotesStore((s) => s.notes);
-  const selectedNote = useNotesStore((s) => s.selectedNote);
-  const attentionEnabled = useAttentionStore((s) => s.enabled);
-  const setAttentionEnabled = useAttentionStore((s) => s.setEnabled);
-  const { videoRef, canvasRef } = useAttentionMonitor();
-  const { start, stop } = useRecorder();
+  const audioUrl = useRecorderStore((s) => s.audioUrl);
+  const elapsedMs = useRecorderStore((s) => s.elapsedMs);
 
-  const handleTranscribe = useCallback(async () => {
-    const blob = useRecorderStore.getState().audioBlob;
-    if (!blob) return;
+  // Keep track of transcript text via polling — simple, avoids hook chain issues
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const text = useTranscriptionStore.getState().text;
+      const interim = useTranscriptionStore.getState().interimText;
+      setRecordingText(text + (interim ? " " + interim : ""));
+    }, 100);
+    return () => clearInterval(interval);
+  }, []);
 
-    const apiKey = localStorage.getItem("mindnote_openai_key") || "";
-    const text = await transcribeWithWhisper(blob, apiKey);
-
-    if (text) {
-      const duration = Math.floor(useRecorderStore.getState().elapsedMs / 1000);
-      const note = await createNote({
-        rawTranscript: text,
-        title: text.slice(0, 60),
-        duration,
-        audioUrl: useRecorderStore.getState().audioUrl,
-      });
-
-      const aiKey = localStorage.getItem("mindnote_ai_key") || "";
-      if (aiKey) {
-        const result = await runStructuring(text, "auto", {
-          ...DEFAULT_AI_CONFIG,
-          apiKey: aiKey,
-        });
-        if (result) {
-          setStructuredContent(note.id, result);
-          setShowStructured(true);
-        }
-      }
+  const handleMainButton = useCallback(() => {
+    switch (status) {
+      case "idle":
+      case "error":
+        useTranscriptionStore.getState().reset();
+        setRecordingText("");
+        start();
+        break;
+      case "recording":
+        pause();
+        break;
+      case "paused":
+        resume();
+        break;
     }
-  }, [transcribeWithWhisper, createNote, runStructuring, setStructuredContent]);
+  }, [status, start, pause, resume]);
+
+  const handleStop = useCallback(() => {
+    stop();
+  }, [stop]);
 
   const handleReset = useCallback(() => {
     useRecorderStore.getState().reset();
     useTranscriptionStore.getState().reset();
-    useStructuringStore.getState().reset();
-    setShowStructured(false);
+    setRecordingText("");
   }, []);
 
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (showHelp) return;
-
-      if (e.code === "Space") {
-        e.preventDefault();
-        const s = useRecorderStore.getState().status;
-        if (s === "idle" || s === "error") start();
-        else if (s === "recording") useRecorderStore.getState().setStatus("paused");
-        else if (s === "paused") useRecorderStore.getState().setStatus("recording");
-      }
-      if (e.ctrlKey && e.key === "n") {
-        e.preventDefault();
-        router.push("/notes");
-      }
-      if (e.ctrlKey && e.key === "e") {
-        e.preventDefault();
-        const note = useNotesStore.getState().selectedNote;
-        if (note) exportNote(note, "markdown");
-      }
-      if (e.key === "Escape") {
-        setShowHelp(false);
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [showHelp, start, router]);
-
-  const hasTranscript = text.length > 0;
+  const totalSecs = Math.floor(elapsedMs / 1000);
+  const mins = Math.floor(totalSecs / 60);
+  const secs = totalSecs % 60;
+  const isActive = status === "recording" || status === "paused";
 
   return (
-    <FocusOverlay>
-      <div className="min-h-screen flex flex-col">
-        {/* Top bar */}
-        <div className="flex items-center justify-between p-4">
-          <div className="flex items-center gap-2">
-            <Sparkles className="size-5 text-primary" />
-            <span className="font-semibold text-lg">MindNote</span>
-          </div>
-          <div className="flex items-center gap-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowHelp(true)}
-              title="使用帮助"
-              className="text-amber-400 hover:text-amber-300"
-            >
-              <HelpCircle className="size-4 mr-1" /> 帮助
-            </Button>
-            <Button
-              variant={attentionEnabled ? "secondary" : "ghost"}
-              size="sm"
-              onClick={() => setAttentionEnabled(!attentionEnabled)}
-              title="Toggle attention pet"
-            >
-              <Cctv className="size-4" />
-            </Button>
-            <FocusToggle />
-          </div>
+    <div style={{
+      minHeight: "100vh",
+      display: "flex",
+      flexDirection: "column",
+      backgroundColor: "#1a1b2e",
+      color: "#e8e8f0",
+      fontFamily: "system-ui, sans-serif",
+    }}>
+      {/* Top bar */}
+      <div style={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        padding: "16px 20px",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <span style={{ fontSize: "24px" }}>✨</span>
+          <span style={{ fontSize: "18px", fontWeight: 700 }}>MindNote</span>
         </div>
-
-        {/* Main */}
-        <div className="flex-1 flex flex-col items-center justify-center px-4 py-8 max-w-4xl mx-auto w-full">
-          {!hasTranscript && status === "idle" && (
-            <motion.div
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              className="text-center space-y-8"
-            >
-              <div>
-                <h1 className="text-3xl font-bold tracking-tight">Capture your thoughts</h1>
-                <p className="text-muted-foreground mt-2 text-lg">
-                  Speak freely. We&apos;ll organize everything.
-                </p>
-              </div>
-              <RecordButton />
-              <RecordingTimer />
-            </motion.div>
-          )}
-
-          {(status === "recording" || status === "paused") && (
-            <div className="text-center space-y-6 w-full">
-              <RecordingTimer />
-              <TranscriptDisplay />
-              <RecordButton />
-            </div>
-          )}
-
-          {!showStructured && hasTranscript && (
-            <div className="space-y-6 w-full">
-              <RecordButton />
-              <TranscriptDisplay />
-              {audioUrl && <AudioPlayer audioUrl={audioUrl} />}
-              <div className="flex items-center justify-center gap-3">
-                <Button variant="outline" onClick={handleReset}>Record Again</Button>
-                {!result && (
-                  <Button onClick={handleTranscribe} disabled={isStructuring}>
-                    <Sparkles className="size-4 mr-1" />
-                    Structure with AI
-                  </Button>
-                )}
-              </div>
-            </div>
-          )}
-
-          {showStructured && result && (
-            <div className="space-y-6 w-full">
-              <div className="flex items-center justify-between">
-                <Badge variant="secondary" className="gap-1">
-                  <Sparkles className="size-3" /> AI Structured
-                </Badge>
-                <div className="flex gap-2">
-                  <Button variant="ghost" size="sm" onClick={() => setShowStructured(false)}>
-                    View Raw
-                  </Button>
-                  <Button variant="outline" size="sm" onClick={handleReset}>New Recording</Button>
-                </div>
-              </div>
-              <div className="p-6 rounded-xl bg-card border border-border">
-                <h2 className="text-xl font-semibold mb-2">{result.title}</h2>
-                <p className="text-muted-foreground mb-4">{result.summary}</p>
-                {result.keyPoints.length > 0 && (
-                  <div className="space-y-2 mb-4">
-                    <h3 className="text-sm font-semibold text-muted-foreground">Key Points</h3>
-                    <ul className="space-y-1.5">
-                      {result.keyPoints.map((p: string, i: number) => (
-                        <li key={i} className="flex items-start gap-2 text-sm">
-                          <span className="mt-1.5 size-1.5 rounded-full bg-accent shrink-0" />
-                          {p}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
-                {result.todos.length > 0 && (
-                  <div className="space-y-2">
-                    <h3 className="text-sm font-semibold text-muted-foreground">Action Items</h3>
-                    {result.todos.map((t: { text: string; done: boolean }, i: number) => (
-                      <div key={i} className="flex items-center gap-2 text-sm">
-                        <div className="size-4 rounded border-2 border-muted-foreground" />
-                        {t.text}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-
-        {/* Hidden camera feed for attention monitor */}
-        <video
-          ref={videoRef}
-          className="hidden"
-          playsInline
-          muted
-        />
-        <canvas ref={canvasRef} className="hidden" />
-
-        {/* Pet monitor overlay */}
-        <PetMonitor />
-
-        {/* Help dialog */}
-        <HelpDialog open={showHelp} onOpenChange={setShowHelp} />
+        <button
+          onClick={() => setShowHelp(true)}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: "6px",
+            padding: "8px 14px",
+            borderRadius: "8px",
+            border: "1px solid rgba(255,255,255,0.1)",
+            backgroundColor: "transparent",
+            color: "#f59e0b",
+            cursor: "pointer",
+            fontSize: "14px",
+          }}
+        >
+          <HelpCircle style={{ width: "16px", height: "16px" }} /> 帮助
+        </button>
       </div>
-    </FocusOverlay>
+
+      {/* Main content */}
+      <div style={{
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: "20px",
+        maxWidth: "700px",
+        margin: "0 auto",
+        width: "100%",
+      }}>
+        {/* Idle state */}
+        {status === "idle" && (
+          <div style={{ textAlign: "center" }}>
+            <h1 style={{ fontSize: "28px", fontWeight: 700, marginBottom: "8px" }}>
+              Capture your thoughts
+            </h1>
+            <p style={{ color: "rgba(255,255,255,0.5)", fontSize: "16px", marginBottom: "40px" }}>
+              Speak freely. We'll organize everything.
+            </p>
+            <button
+              onClick={handleMainButton}
+              style={{
+                width: "120px",
+                height: "120px",
+                borderRadius: "50%",
+                border: "none",
+                backgroundColor: "#f59e0b",
+                color: "#1a1b2e",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                margin: "0 auto",
+                boxShadow: "0 0 40px rgba(245, 158, 11, 0.3)",
+                transition: "transform 0.15s",
+              }}
+              onMouseOver={(e) => (e.currentTarget.style.transform = "scale(1.05)")}
+              onMouseOut={(e) => (e.currentTarget.style.transform = "scale(1)")}
+            >
+              <Mic style={{ width: "48px", height: "48px" }} />
+            </button>
+            <p style={{ color: "rgba(255,255,255,0.4)", fontSize: "14px", marginTop: "20px" }}>
+              Tap to start recording
+            </p>
+          </div>
+        )}
+
+        {/* Requesting state */}
+        {status === "requesting" && (
+          <div style={{ textAlign: "center" }}>
+            <p style={{ color: "rgba(255,255,255,0.5)", fontSize: "16px" }}>
+              Requesting microphone access...
+            </p>
+            <p style={{ color: "rgba(255,255,255,0.3)", fontSize: "13px", marginTop: "8px" }}>
+              Please allow microphone access in your browser
+            </p>
+          </div>
+        )}
+
+        {/* Error state */}
+        {status === "error" && (
+          <div style={{ textAlign: "center" }}>
+            <p style={{ color: "#ef4444", fontSize: "16px", marginBottom: "16px" }}>
+              {useRecorderStore.getState().error || "Microphone access denied"}
+            </p>
+            <button
+              onClick={handleReset}
+              style={{
+                padding: "10px 24px",
+                borderRadius: "8px",
+                border: "1px solid rgba(255,255,255,0.2)",
+                backgroundColor: "transparent",
+                color: "#e8e8f0",
+                cursor: "pointer",
+                fontSize: "14px",
+              }}
+            >
+              Try Again
+            </button>
+          </div>
+        )}
+
+        {/* Recording or Paused state */}
+        {isActive && (
+          <div style={{ textAlign: "center", width: "100%" }}>
+            {/* Timer */}
+            <div style={{
+              fontSize: "32px",
+              fontFamily: "monospace",
+              color: "rgba(255,255,255,0.6)",
+              marginBottom: "20px",
+            }}>
+              {String(mins).padStart(2, "0")}:{String(secs).padStart(2, "0")}
+            </div>
+
+            {/* Live transcript */}
+            {recordingText ? (
+              <div style={{
+                backgroundColor: "rgba(255,255,255,0.05)",
+                borderRadius: "12px",
+                padding: "20px",
+                marginBottom: "24px",
+                textAlign: "left",
+                fontSize: "16px",
+                lineHeight: "1.7",
+                minHeight: "80px",
+                maxHeight: "300px",
+                overflowY: "auto",
+                whiteSpace: "pre-wrap",
+              }}>
+                {recordingText}
+                {status === "recording" && !recordingText && (
+                  <span style={{ color: "rgba(255,255,255,0.3)" }}>Listening...</span>
+                )}
+              </div>
+            ) : (
+              <div style={{
+                backgroundColor: "rgba(255,255,255,0.05)",
+                borderRadius: "12px",
+                padding: "20px",
+                marginBottom: "24px",
+                color: "rgba(255,255,255,0.3)",
+                fontSize: "16px",
+              }}>
+                {status === "recording" ? "Listening... start speaking" : "Paused — tap resume to continue"}
+              </div>
+            )}
+
+            {/* Record button */}
+            <button
+              onClick={handleMainButton}
+              style={{
+                width: "100px",
+                height: "100px",
+                borderRadius: "50%",
+                border: status === "recording" ? "3px solid #ef4444" : "3px solid #f59e0b",
+                backgroundColor: status === "recording" ? "rgba(239,68,68,0.15)" : "rgba(245,158,11,0.15)",
+                color: status === "recording" ? "#ef4444" : "#f59e0b",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                margin: "0 auto 12px",
+                boxShadow: status === "recording" ? "0 0 30px rgba(239,68,68,0.4)" : "none",
+              }}
+            >
+              {status === "recording" ? (
+                <Mic style={{ width: "40px", height: "40px" }} />
+              ) : (
+                <MicOff style={{ width: "40px", height: "40px" }} />
+              )}
+            </button>
+            <p style={{ color: "rgba(255,255,255,0.4)", fontSize: "13px" }}>
+              {status === "recording" ? "Recording — tap to pause" : "Paused — tap to resume"}
+            </p>
+
+            {/* Stop button */}
+            <button
+              onClick={handleStop}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "8px 16px",
+                borderRadius: "8px",
+                border: "1px solid rgba(255,255,255,0.2)",
+                backgroundColor: "transparent",
+                color: "#e8e8f0",
+                cursor: "pointer",
+                marginTop: "16px",
+                fontSize: "14px",
+              }}
+            >
+              <Square style={{ width: "14px", height: "14px" }} /> Stop Recording
+            </button>
+          </div>
+        )}
+
+        {/* Post-recording: audio available, text shown */}
+        {status === "idle" && recordingText && (
+          <div style={{ textAlign: "center", width: "100%" }}>
+            <div style={{
+              backgroundColor: "rgba(255,255,255,0.05)",
+              borderRadius: "12px",
+              padding: "20px",
+              marginBottom: "24px",
+              textAlign: "left",
+              fontSize: "16px",
+              lineHeight: "1.7",
+              whiteSpace: "pre-wrap",
+            }}>
+              {recordingText}
+            </div>
+            {audioUrl && (
+              <audio src={audioUrl} controls style={{ width: "100%", marginBottom: "16px" }} />
+            )}
+            <div style={{ display: "flex", gap: "10px", justifyContent: "center" }}>
+              <button
+                onClick={handleReset}
+                style={{
+                  padding: "10px 20px",
+                  borderRadius: "8px",
+                  border: "1px solid rgba(255,255,255,0.2)",
+                  backgroundColor: "transparent",
+                  color: "#e8e8f0",
+                  cursor: "pointer",
+                  fontSize: "14px",
+                }}
+              >
+                Record Again
+              </button>
+              <button
+                onClick={() => {
+                  navigator.clipboard.writeText(recordingText);
+                }}
+                style={{
+                  padding: "10px 20px",
+                  borderRadius: "8px",
+                  border: "none",
+                  backgroundColor: "#f59e0b",
+                  color: "#1a1b2e",
+                  cursor: "pointer",
+                  fontSize: "14px",
+                  fontWeight: 600,
+                }}
+              >
+                Copy Text
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Help dialog */}
+      <HelpDialog open={showHelp} onOpenChange={setShowHelp} />
+    </div>
   );
 }
